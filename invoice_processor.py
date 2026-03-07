@@ -129,7 +129,7 @@ def upload_pdf_to_notion(pdf_bytes: bytes, filename: str) -> str | None:
     # Step 2 — send bytes
     upload_resp = requests.post(
         upload_url,
-        headers={"Authorization": f"Bearer {NOTION_API_KEY}"},
+        headers={"Authorization": f"Bearer {NOTION_API_KEY}", "Notion-Version": NOTION_VERSION},
         files={"file": (filename, pdf_bytes, "application/pdf")},
     )
     if not upload_resp.ok:
@@ -145,7 +145,7 @@ def create_notion_entry(data: dict, pdf_bytes: bytes | None, filename: str, emai
 
     # Base properties
     properties = {
-        "Supplier Name": {
+        "Name": {
             "title": [{"text": {"content": data.get("supplier_name") or "Unknown Supplier"}}]
         },
         "Status": {
