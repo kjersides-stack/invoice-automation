@@ -180,8 +180,19 @@ def create_notion_entry(data, pdf_bytes, filename, email_subject):
     if data.get("amount_dkk") is not None:
         properties["Amount (DKK)"] = {"number": float(data["amount_dkk"])}
 
-    if data.get("due_date"):
+   if data.get("due_date"):
         properties["Due Date"] = {"date": {"start": data["due_date"]}}
+        # Auto-populate Month field from due date
+        month_names = {
+            1: "Januar", 2: "Februar", 3: "Marts", 4: "April",
+            5: "Maj", 6: "Juni", 7: "Juli", 8: "August",
+            9: "September", 10: "Oktober", 11: "November", 12: "December"
+        }
+        from datetime import datetime
+        due = datetime.strptime(data["due_date"], "%Y-%m-%d")
+        properties["Month"] = {"select": {"name": month_names[due.month]}}
+    else:
+        properties["Month"] = {"select": {"name": "Ingen Dato"}}
 
     if pdf_bytes:
         file_upload_id = upload_pdf_to_notion(pdf_bytes, filename)
