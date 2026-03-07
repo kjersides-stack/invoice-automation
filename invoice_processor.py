@@ -85,6 +85,11 @@ def extract_invoice_data(pdf_bytes: bytes) -> dict:
     )
 
     raw = message.content[0].text.strip()
+    # Strip markdown code fences if present
+    if raw.startswith('''\\''')[1]
+        if raw.startswith('json'):
+            raw = raw[4:]
+        raw = raw.strip()
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
