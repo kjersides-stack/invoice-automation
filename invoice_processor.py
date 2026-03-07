@@ -164,7 +164,7 @@ def create_notion_entry(data, pdf_bytes, filename, email_subject):
             "title": [{"text": {"content": data.get("supplier_name") or "Unknown Supplier"}}]
         },
         "Status": {
-            "status": {"name": "Pending Review"}
+            "select": {"name": "Incoming"}
         },
         "Payment Type": {
             "select": {"name": data.get("payment_type", "Unknown")}
