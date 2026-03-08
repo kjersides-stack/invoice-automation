@@ -143,9 +143,8 @@ def ensure_list(lists, name):
     if name in lists:
         return lists[name]
     resp = requests.post(
-        "https://api.trello.com/1/lists",
-        params=TRELLO_AUTH,
-        json={"name": name, "idBoard": TRELLO_BOARD_ID},
+        f"https://api.trello.com/1/boards/{TRELLO_BOARD_ID}/lists",
+        params={**TRELLO_AUTH, "name": name},
     )
     resp.raise_for_status()
     new_id = resp.json()["id"]
