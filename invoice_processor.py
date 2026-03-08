@@ -1,6 +1,7 @@
 """
 Invoice Automation - invoice_processor.py
 Polls IMAP inbox, extracts PDF data via Claude API, creates Trello cards.
+Runs a Flask webhook server to receive Trello card move events and update totals.
 """
 
 import imaplib
@@ -10,11 +11,15 @@ import base64
 import json
 import logging
 import os
+import threading
 from datetime import datetime
 from email.header import decode_header
 
 import anthropic
 import requests
+from flask import Flask, request, jsonify
+
+app = Flask(__name__)
 
 # Logging
 logging.basicConfig(
@@ -401,10 +406,44 @@ def process_unseen_emails():
             imap.store(msg_id, "+FLAGS", "\\Seen")
 
 
-def main():
-    global TRELLO_FULL_BOARD_ID
-    TRELLO_FULL_BOARD_ID = get_full_board_id()
-    log.info("Invoice processor started (Trello). Board ID: %s. Poll interval: %ds", TRELLO_FULL_BOARD_ID, POLL_INTERVAL_SECONDS)
+def recalculate_all_totals():
+    """Recalculate totals for all lists on the board."""
+    try:
+        lists = get_board_lists()
+        action_lists = {"Skal betales", "Trækkes i denne uge", "Betalt", "Bogført", "Ingen dato"}
+        for list_name, list_id in lists.items():
+            if list_name not in action_lists and not list_name.startswith("TOTAL"):
+                update_total_card(lists, list_name, list_id)
+    except Exception as e:
+        log.warning("Error recalculating totals: %s", e)
+
+
+@app.route("/webhook", methods=["GET", "POST"])
+def webhook():
+    if request.method == "GET":
+        # Trello verifies the webhook endpoint with a HEAD/GET request
+        return "", 200
+    try:
+        payload = request.get_json(silent=True) or {}
+        action = payload.get("action", {})
+        action_type = action.get("type", "")
+        # Card moved to a different list
+        if action_type == "updateCard":
+            data = action.get("data", {})
+            if "listAfter" in data or "listBefore" in data:
+                log.info("Card moved — recalculating totals")
+                threading.Thread(target=recalculate_all_totals, daemon=True).start()
+    except Exception as e:
+        log.warning("Webhook error: %s", e)
+    return "", 200
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok"}), 200
+
+
+def polling_loop():
     while True:
         try:
             process_unseen_emails()
@@ -412,6 +451,21 @@ def main():
             log.exception("Error during poll cycle: %s", exc)
         log.info("Sleeping %d minutes...", POLL_INTERVAL_SECONDS // 60)
         time.sleep(POLL_INTERVAL_SECONDS)
+
+
+def main():
+    global TRELLO_FULL_BOARD_ID
+    TRELLO_FULL_BOARD_ID = get_full_board_id()
+    log.info("Invoice processor started (Trello). Board ID: %s. Poll interval: %ds", TRELLO_FULL_BOARD_ID, POLL_INTERVAL_SECONDS)
+
+    # Run polling loop in background thread
+    t = threading.Thread(target=polling_loop, daemon=True)
+    t.start()
+
+    # Run Flask in main thread (required by Render web service)
+    port = int(os.environ.get("PORT", 10000))
+    log.info("Starting webhook server on port %d", port)
+    app.run(host="0.0.0.0", port=port)
 
 
 if __name__ == "__main__":
