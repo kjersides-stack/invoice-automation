@@ -37,7 +37,7 @@ TRELLO_API_KEY = os.environ["TRELLO_API_KEY"]
 TRELLO_TOKEN = os.environ["TRELLO_TOKEN"]
 TRELLO_BOARD_ID = os.environ["TRELLO_BOARD_ID"]
 
-POLL_INTERVAL_SECONDS = 3 * 60
+POLL_INTERVAL_SECONDS = 15 * 60
 
 claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
@@ -433,8 +433,9 @@ def webhook():
         # Card moved to a different list
         if action_type == "updateCard":
             data = action.get("data", {})
-            if "listAfter" in data or "listBefore" in data:
-                log.info("Card moved — recalculating totals")
+            card = data.get("card", {})
+            if "listAfter" in data or "listBefore" in data or "closed" in card:
+                log.info("Card moved or archived — recalculating totals")
                 threading.Thread(target=recalculate_all_totals, daemon=True).start()
     except Exception as e:
         log.warning("Webhook error: %s", e)
