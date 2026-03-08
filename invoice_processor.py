@@ -37,7 +37,7 @@ TRELLO_API_KEY = os.environ["TRELLO_API_KEY"]
 TRELLO_TOKEN = os.environ["TRELLO_TOKEN"]
 TRELLO_BOARD_ID = os.environ["TRELLO_BOARD_ID"]
 
-POLL_INTERVAL_SECONDS = 15 * 60
+POLL_INTERVAL_SECONDS = 3 * 60
 
 claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
