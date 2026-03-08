@@ -267,7 +267,7 @@ def update_total_card(lists, list_name, list_id):
         if total_card_id:
             requests.put(
                 f"https://api.trello.com/1/cards/{total_card_id}",
-                params={**TRELLO_AUTH, "name": total_text},
+                params={**TRELLO_AUTH, "name": total_text, "pos": "top"},
             )
         else:
             requests.post(
@@ -283,6 +283,45 @@ def update_total_card(lists, list_name, list_id):
     except Exception as e:
         log.warning("Could not update total card: %s", e)
 
+
+
+def get_card_position(list_id, due_date):
+    """Return a Trello position value so the card is inserted in due-date order,
+    after the TOTAL card but before any card with a later due date."""
+    try:
+        resp = requests.get(
+            f"https://api.trello.com/1/lists/{list_id}/cards",
+            params={**TRELLO_AUTH, "fields": "name,due,pos"},
+        )
+        resp.raise_for_status()
+        cards = resp.json()
+
+        # Separate TOTAL card and invoice cards with a due date
+        invoice_cards = [
+            c for c in cards
+            if not c["name"].startswith("TOTAL:") and c.get("due")
+        ]
+
+        if not due_date or not invoice_cards:
+            return "bottom"
+
+        new_due = datetime.strptime(due_date, "%Y-%m-%d")
+
+        # Find the first card whose due date is later than ours
+        invoice_cards.sort(key=lambda c: c["pos"])
+        for card in invoice_cards:
+            try:
+                card_due = datetime.strptime(card["due"][:10], "%Y-%m-%d")
+                if card_due > new_due:
+                    # Insert just before this card
+                    return card["pos"] - 1
+            except (ValueError, TypeError):
+                continue
+
+        return "bottom"
+    except Exception as e:
+        log.warning("Could not calculate card position: %s", e)
+        return "bottom"
 
 def create_trello_card(data, pdf_bytes, filename, email_subject):
     if not data.get("is_invoice", True):
@@ -352,12 +391,15 @@ def create_trello_card(data, pdf_bytes, filename, email_subject):
 
     desc = build_card_description(data, email_subject)
 
+    pos = get_card_position(list_id, due_date) if not is_drs else "bottom"
+
     params = {
         **TRELLO_AUTH,
         "name": card_name,
         "desc": desc,
         "idList": list_id,
         "idLabels": ",".join(label_ids),
+        "pos": pos,
     }
 
     if due_date:
