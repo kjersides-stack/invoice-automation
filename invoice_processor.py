@@ -197,7 +197,7 @@ def build_card_description(data, email_subject):
 
     amount = data.get("amount_dkk")
     if amount is not None:
-        lines.append(f"**Beloeb:** {amount:,.2f} DKK")
+        lines.append(f"**Beloeb:** kr. {amount:,.2f}")
 
     due = data.get("due_date")
     if due:
@@ -243,12 +243,12 @@ def update_total_card(lists, list_name, list_id):
                 for line in desc.split("\n"):
                     if "**Beloeb:**" in line:
                         try:
-                            amount_str = line.split("**Beloeb:**")[1].strip().replace(",", "").replace(" DKK", "")
+                            amount_str = line.split("**Beloeb:**")[1].strip().replace(",", "").replace(" kr.", "").replace("kr. ", "")
                             total += float(amount_str)
                         except (ValueError, IndexError):
                             pass
 
-        total_text = f"TOTAL: {total:,.2f} DKK"
+        total_text = f"TOTAL: kr. {total:,.2f}"
 
         if total_card_id:
             requests.put(
@@ -312,12 +312,12 @@ def create_trello_card(data, pdf_bytes, filename, email_subject):
         # Store as negative for total calculation
         if amount is not None:
             data["amount_dkk"] = -abs(amount)
-            card_name = f"{supplier} - KREDIT -{amount:,.2f} DKK"
+            card_name = f"{supplier} - KREDIT -kr. {amount:,.2f}"
         else:
             card_name = f"{supplier} - KREDIT"
     else:
         if amount is not None:
-            card_name = f"{supplier} - {amount:,.2f} DKK"
+            card_name = f"{supplier} - kr. {amount:,.2f}"
         else:
             card_name = supplier
 
