@@ -58,6 +58,11 @@ MONTH_NAMES = {
     9: "September", 10: "Oktober", 11: "November", 12: "December"
 }
 
+# Suppliers that are always Auto-debit regardless of what the PDF says
+AUTO_DEBIT_SUPPLIERS = [
+    "dagrofa",
+]
+
 EXTRACTION_PROMPT = """
 You are an invoice data extraction assistant. Analyse the attached PDF and
 return ONLY a valid JSON object with no explanation, no markdown, no code fences.
@@ -312,6 +317,10 @@ def create_trello_card(data, pdf_bytes, filename, email_subject):
     manual_label = ensure_label(labels, "Manuel", "red")
     kreditnota_label = ensure_label(labels, "Kreditnota", "green")
     ensure_label(labels, "Rykker", "yellow")
+
+    # Hardcoded Auto-debit override for known suppliers
+    if any(s in supplier.lower() for s in AUTO_DEBIT_SUPPLIERS):
+        data["payment_type"] = "Auto-debit"
 
     is_kreditnota = data.get("is_kreditnota", False)
     payment_type = data.get("payment_type", "Unknown")
