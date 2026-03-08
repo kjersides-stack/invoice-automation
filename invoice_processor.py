@@ -413,7 +413,7 @@ def recalculate_all_totals():
     """Recalculate totals for all lists on the board."""
     try:
         lists = get_board_lists()
-        action_lists = {"Skal betales", "Trækkes i denne uge", "Betalt", "Bogført", "Ingen dato"}
+        action_lists = {"Betalt", "Bogført"}
         for list_name, list_id in lists.items():
             if list_name not in action_lists and not list_name.startswith("TOTAL"):
                 update_total_card(lists, list_name, list_id)
