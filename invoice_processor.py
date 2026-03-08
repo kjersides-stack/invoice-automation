@@ -59,11 +59,12 @@ MONTH_NAMES = {
 }
 
 EXTRACTION_PROMPT = """
-You are an invoice data extraction assistant. Analyse the attached PDF invoice and
+You are an invoice data extraction assistant. Analyse the attached PDF and
 return ONLY a valid JSON object with no explanation, no markdown, no code fences.
 
 Fields to extract:
 {
+  "is_invoice":      true or false,
   "supplier_name":   string or null,
   "amount_dkk":      number or null,
   "due_date":        string or null,
@@ -73,6 +74,9 @@ Fields to extract:
 }
 
 Rules:
+- is_invoice: set to true ONLY if this is an invoice (faktura) or credit note (kreditnota).
+  Set to false for account statements (kontoudtog), letters, contracts, reminders without
+  an invoice amount, or any other document that is not a direct payment request.
 - payment_type: look for keywords like betalingsservice, PBS, direct debit,
   automatisk betaling -> Auto-debit; otherwise -> Manual; if unclear -> Unknown.
 - amount_dkk: always extract as a POSITIVE number regardless of how it appears.
@@ -271,6 +275,10 @@ def update_total_card(lists, list_name, list_id):
 
 
 def create_trello_card(data, pdf_bytes, filename, email_subject):
+    if not data.get("is_invoice", True):
+        log.info("Skipping non-invoice PDF (%s): %s", filename, email_subject)
+        return
+
     lists = get_board_lists()
     labels = get_board_labels()
 
