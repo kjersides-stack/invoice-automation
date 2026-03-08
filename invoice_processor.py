@@ -158,8 +158,7 @@ def ensure_label(labels, name, color):
         return labels[name]
     resp = requests.post(
         "https://api.trello.com/1/labels",
-        params=TRELLO_AUTH,
-        json={"name": name, "color": color, "idBoard": TRELLO_BOARD_ID},
+        params={**TRELLO_AUTH, "name": name, "color": color, "idBoard": TRELLO_BOARD_ID},
     )
     resp.raise_for_status()
     new_id = resp.json()["id"]
