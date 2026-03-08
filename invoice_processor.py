@@ -1,6 +1,6 @@
 """
 Invoice Automation - invoice_processor.py
-Polls IMAP inbox, extracts PDF data via Claude API, creates Notion entries.
+Polls IMAP inbox, extracts PDF data via Claude API, creates Trello cards.
 """
 
 import imaplib
@@ -10,6 +10,7 @@ import base64
 import json
 import logging
 import os
+from datetime import datetime
 from email.header import decode_header
 
 import anthropic
@@ -27,12 +28,19 @@ IMAP_HOST = os.environ["IMAP_HOST"]
 IMAP_USER = os.environ["IMAP_USER"]
 IMAP_PASSWORD = os.environ["IMAP_PASSWORD"]
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
-NOTION_API_KEY = os.environ["NOTION_API_KEY"]
-NOTION_DATABASE_ID = os.environ["NOTION_DATABASE_ID"]
+TRELLO_API_KEY = os.environ["TRELLO_API_KEY"]
+TRELLO_TOKEN = os.environ["TRELLO_TOKEN"]
+TRELLO_BOARD_ID = os.environ["TRELLO_BOARD_ID"]
 
 POLL_INTERVAL_SECONDS = 15 * 60
 
 claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+MONTH_NAMES = {
+    1: "Januar", 2: "Februar", 3: "Marts", 4: "April",
+    5: "Maj", 6: "Juni", 7: "Juli", 8: "August",
+    9: "September", 10: "Oktober", 11: "November", 12: "December"
+}
 
 EXTRACTION_PROMPT = """
 You are an invoice data extraction assistant. Analyse the attached PDF invoice and
@@ -52,6 +60,7 @@ Rules:
   automatisk betaling -> Auto-debit; otherwise -> Manual; if unclear -> Unknown.
 - amount_dkk: convert decimal commas to decimal points (1.234,56 -> 1234.56).
 - If due_date is missing set to null. Do NOT guess.
+- due_date format: YYYY-MM-DD
 - supplier_name: prefer legal entity name.
 - Return ONLY the JSON object, nothing else.
 """
@@ -83,7 +92,6 @@ def extract_invoice_data(pdf_bytes):
 
     raw = message.content[0].text.strip()
 
-    # Remove any markdown code fences
     if "```" in raw:
         parts = raw.split("```")
         for part in parts:
@@ -108,119 +116,210 @@ def extract_invoice_data(pdf_bytes):
         }
 
 
-NOTION_VERSION = "2022-06-28"
-NOTION_HEADERS = {
-    "Authorization": "Bearer " + NOTION_API_KEY,
-    "Content-Type": "application/json",
-    "Notion-Version": NOTION_VERSION,
-}
+# Trello helpers
+
+TRELLO_AUTH = {"key": TRELLO_API_KEY, "token": TRELLO_TOKEN}
 
 
-def upload_pdf_to_notion(pdf_bytes, filename):
+def get_board_lists():
+    resp = requests.get(
+        f"https://api.trello.com/1/boards/{TRELLO_BOARD_ID}/lists",
+        params=TRELLO_AUTH,
+    )
+    resp.raise_for_status()
+    return {lst["name"]: lst["id"] for lst in resp.json()}
+
+
+def get_board_labels():
+    resp = requests.get(
+        f"https://api.trello.com/1/boards/{TRELLO_BOARD_ID}/labels",
+        params=TRELLO_AUTH,
+    )
+    resp.raise_for_status()
+    return {lbl["name"]: lbl["id"] for lbl in resp.json() if lbl.get("name")}
+
+
+def ensure_list(lists, name):
+    if name in lists:
+        return lists[name]
     resp = requests.post(
-        "https://api.notion.com/v1/file_uploads",
-        headers=NOTION_HEADERS,
-        json={"content_type": "application/pdf"},
+        "https://api.trello.com/1/lists",
+        params={**TRELLO_AUTH, "name": name, "idBoard": TRELLO_BOARD_ID},
     )
-    if not resp.ok:
-        log.warning("Notion file upload init failed: %s", resp.text)
-        return None
+    resp.raise_for_status()
+    new_id = resp.json()["id"]
+    lists[name] = new_id
+    log.info("Created Trello list: %s", name)
+    return new_id
 
-    upload = resp.json()
-    upload_url = upload.get("upload_url")
-    file_upload_id = upload.get("id")
 
-    upload_resp = requests.post(
-        upload_url,
-        headers={
-            "Authorization": "Bearer " + NOTION_API_KEY,
-            "Notion-Version": NOTION_VERSION,
-        },
-        files={"file": (filename, pdf_bytes, "application/pdf")},
+def ensure_label(labels, name, color):
+    if name in labels:
+        return labels[name]
+    resp = requests.post(
+        "https://api.trello.com/1/labels",
+        params={**TRELLO_AUTH, "name": name, "color": color, "idBoard": TRELLO_BOARD_ID},
     )
-    if not upload_resp.ok:
-        log.warning("Notion file upload failed: %s", upload_resp.text)
-        return None
-
-    return file_upload_id
-
-
-def build_notes(data, due_date_missing):
-    parts = []
-    if due_date_missing:
-        parts.append("No due date found - please set manually.")
-    if data.get("payment_type") == "Unknown":
-        parts.append("Payment type unclear - please set Auto-debit or Manual.")
-    if data.get("notes"):
-        parts.append(data["notes"])
-    return "  ".join(parts) if parts else ""
+    resp.raise_for_status()
+    new_id = resp.json()["id"]
+    labels[name] = new_id
+    log.info("Created Trello label: %s", name)
+    return new_id
 
 
-def create_notion_entry(data, pdf_bytes, filename, email_subject):
-    due_date_missing = data.get("due_date") is None
+def build_card_description(data, email_subject):
+    lines = []
 
-    properties = {
-        "Name": {
-            "title": [{"text": {"content": data.get("supplier_name") or "Unknown Supplier"}}]
-        },
-        "Status": {
-            "select": {"name": "Incoming"}
-        },
-        "Payment Type": {
-            "select": {"name": data.get("payment_type", "Unknown")}
-        },
-        "Source Email Subject": {
-            "rich_text": [{"text": {"content": email_subject[:200]}}]
-        },
-        "Notes": {
-            "rich_text": [{"text": {"content": build_notes(data, due_date_missing)}}]
-        },
-    }
+    amount = data.get("amount_dkk")
+    if amount is not None:
+        lines.append(f"**Beloeb:** {amount:,.2f} DKK")
 
-    if data.get("amount_dkk") is not None:
-        properties["Amount (DKK)"] = {"number": float(data["amount_dkk"])}
-
-    month_names = {
-        1: "Januar", 2: "Februar", 3: "Marts", 4: "April",
-        5: "Maj", 6: "Juni", 7: "Juli", 8: "August",
-        9: "September", 10: "Oktober", 11: "November", 12: "December"
-    }
-    if data.get("due_date"):
-        properties["Due Date"] = {"date": {"start": data["due_date"]}}
-        from datetime import datetime
-        due = datetime.strptime(data["due_date"], "%Y-%m-%d")
-        properties["Month"] = {"select": {"name": month_names[due.month]}}
+    due = data.get("due_date")
+    if due:
+        try:
+            due_fmt = datetime.strptime(due, "%Y-%m-%d").strftime("%d.%m.%Y")
+            lines.append(f"**Forfaldsdato:** {due_fmt}")
+        except ValueError:
+            lines.append(f"**Forfaldsdato:** {due}")
     else:
-        properties["Month"] = {"select": {"name": "Ingen Dato"}}
+        lines.append("**Forfaldsdato:** Ikke fundet - saet manuelt")
+
+    payment = data.get("payment_type", "Unknown")
+    lines.append(f"**Betalingstype:** {payment}")
+    lines.append(f"**Email:** {email_subject}")
+
+    notes = data.get("notes", "")
+    if notes:
+        lines.append(f"\nNoter: {notes}")
+
+    if payment == "Unknown":
+        lines.append("Betalingstype ukendt - tjek om Auto-debit eller Manuel")
+
+    return "\n".join(lines)
+
+
+def update_total_card(lists, list_name, list_id):
+    try:
+        resp = requests.get(
+            f"https://api.trello.com/1/lists/{list_id}/cards",
+            params=TRELLO_AUTH,
+        )
+        resp.raise_for_status()
+        cards = resp.json()
+
+        total = 0.0
+        total_card_id = None
+
+        for card in cards:
+            if card["name"].startswith("TOTAL:"):
+                total_card_id = card["id"]
+            else:
+                desc = card.get("desc", "")
+                for line in desc.split("\n"):
+                    if "**Beloeb:**" in line:
+                        try:
+                            amount_str = line.split("**Beloeb:**")[1].strip().replace(",", "").replace(" DKK", "")
+                            total += float(amount_str)
+                        except (ValueError, IndexError):
+                            pass
+
+        total_text = f"TOTAL: {total:,.2f} DKK"
+
+        if total_card_id:
+            requests.put(
+                f"https://api.trello.com/1/cards/{total_card_id}",
+                params={**TRELLO_AUTH, "name": total_text},
+            )
+        else:
+            requests.post(
+                "https://api.trello.com/1/cards",
+                params={
+                    **TRELLO_AUTH,
+                    "name": total_text,
+                    "idList": list_id,
+                    "pos": "top",
+                },
+            )
+        log.info("Updated total for %s: %s", list_name, total_text)
+    except Exception as e:
+        log.warning("Could not update total card: %s", e)
+
+
+def create_trello_card(data, pdf_bytes, filename, email_subject):
+    lists = get_board_lists()
+    labels = get_board_labels()
+
+    due_date = data.get("due_date")
+    if due_date:
+        try:
+            due = datetime.strptime(due_date, "%Y-%m-%d")
+            list_name = MONTH_NAMES[due.month]
+        except (ValueError, KeyError):
+            list_name = "Ingen dato"
+    else:
+        list_name = "Ingen dato"
+
+    ensure_list(lists, "Ingen dato")
+    list_id = ensure_list(lists, list_name)
+
+    auto_debit_label = ensure_label(labels, "Auto-debit", "blue")
+    manual_label = ensure_label(labels, "Manuel", "green")
+    ensure_label(labels, "Rykker", "red")
+
+    payment_type = data.get("payment_type", "Unknown")
+    label_ids = []
+    if payment_type == "Auto-debit":
+        label_ids.append(auto_debit_label)
+    elif payment_type == "Manual":
+        label_ids.append(manual_label)
+
+    supplier = data.get("supplier_name") or "Ukendt leverandoer"
+    amount = data.get("amount_dkk")
+    if amount is not None:
+        card_name = f"{supplier} - {amount:,.2f} DKK"
+    else:
+        card_name = supplier
+
+    desc = build_card_description(data, email_subject)
+
+    params = {
+        **TRELLO_AUTH,
+        "name": card_name,
+        "desc": desc,
+        "idList": list_id,
+        "idLabels": ",".join(label_ids),
+    }
+
+    if due_date:
+        params["due"] = due_date + "T12:00:00.000Z"
+
+    resp = requests.post("https://api.trello.com/1/cards", params=params)
+    if not resp.ok:
+        log.error("Trello card creation failed: %s", resp.text)
+        return
+
+    card = resp.json()
+    card_id = card["id"]
+    log.info("Trello card created: %s in list %s", card_name, list_name)
 
     if pdf_bytes:
-        file_upload_id = upload_pdf_to_notion(pdf_bytes, filename)
-        if file_upload_id:
-            properties["PDF"] = {
-                "files": [
-                    {
-                        "name": filename,
-                        "type": "file_upload",
-                        "file_upload": {"id": file_upload_id},
-                    }
-                ]
-            }
+        try:
+            attach_resp = requests.post(
+                f"https://api.trello.com/1/cards/{card_id}/attachments",
+                params=TRELLO_AUTH,
+                files={"file": (filename, pdf_bytes, "application/pdf")},
+            )
+            if attach_resp.ok:
+                log.info("PDF attached: %s", filename)
+            else:
+                log.warning("PDF attach failed: %s", attach_resp.text)
+        except Exception as e:
+            log.warning("PDF attach error: %s", e)
 
-    payload = {
-        "parent": {"database_id": NOTION_DATABASE_ID},
-        "properties": properties,
-    }
+    update_total_card(lists, list_name, list_id)
 
-    resp = requests.post(
-        "https://api.notion.com/v1/pages",
-        headers=NOTION_HEADERS,
-        json=payload,
-    )
-    if resp.ok:
-        log.info("Notion entry created: %s", data.get("supplier_name"))
-    else:
-        log.error("Notion creation failed: %s", resp.text)
 
+# Email polling
 
 def get_pdf_attachments(msg):
     pdfs = []
@@ -264,13 +363,13 @@ def process_unseen_emails():
             for filename, pdf_bytes in pdfs:
                 log.info("Processing PDF: %s (from: %s)", filename, subject)
                 data = extract_invoice_data(pdf_bytes)
-                create_notion_entry(data, pdf_bytes, filename, subject)
+                create_trello_card(data, pdf_bytes, filename, subject)
 
             imap.store(msg_id, "+FLAGS", "\\Seen")
 
 
 def main():
-    log.info("Invoice processor started. Poll interval: %ds", POLL_INTERVAL_SECONDS)
+    log.info("Invoice processor started (Trello). Poll interval: %ds", POLL_INTERVAL_SECONDS)
     while True:
         try:
             process_unseen_emails()
