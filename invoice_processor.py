@@ -32,7 +32,7 @@ TRELLO_API_KEY = os.environ["TRELLO_API_KEY"]
 TRELLO_TOKEN = os.environ["TRELLO_TOKEN"]
 TRELLO_BOARD_ID = os.environ["TRELLO_BOARD_ID"]
 
-POLL_INTERVAL_SECONDS = 15 * 60
+POLL_INTERVAL_SECONDS = 3 * 60
 
 claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
@@ -144,7 +144,8 @@ def ensure_list(lists, name):
         return lists[name]
     resp = requests.post(
         "https://api.trello.com/1/lists",
-        params={**TRELLO_AUTH, "name": name, "idBoard": TRELLO_BOARD_ID},
+        params=TRELLO_AUTH,
+        json={"name": name, "idBoard": TRELLO_BOARD_ID},
     )
     resp.raise_for_status()
     new_id = resp.json()["id"]
@@ -158,7 +159,8 @@ def ensure_label(labels, name, color):
         return labels[name]
     resp = requests.post(
         "https://api.trello.com/1/labels",
-        params={**TRELLO_AUTH, "name": name, "color": color, "idBoard": TRELLO_BOARD_ID},
+        params=TRELLO_AUTH,
+        json={"name": name, "color": color, "idBoard": TRELLO_BOARD_ID},
     )
     resp.raise_for_status()
     new_id = resp.json()["id"]
