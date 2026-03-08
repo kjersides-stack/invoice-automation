@@ -79,7 +79,10 @@ Rules:
   Convert decimal commas to decimal points (1.234,56 -> 1234.56).
 - is_kreditnota: set to true if the document is a credit note (kreditnota, kreditering,
   credit note, godtgørelse). Otherwise false.
-- If due_date is missing set to null. Do NOT guess.
+- due_date: use the explicit due date (forfaldsdato) if present.
+  If no explicit due date, calculate it from the invoice date + payment terms.
+  Examples: "30 dage netto" = invoice date + 30 days, "14 dage netto" = invoice date + 14 days,
+  "netto 8 dage" = invoice date + 8 days. If neither due date nor terms are found, set to null.
 - due_date format: YYYY-MM-DD
 - supplier_name: prefer legal entity name.
 - Return ONLY the JSON object, nothing else.
