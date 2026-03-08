@@ -453,10 +453,48 @@ def polling_loop():
         time.sleep(POLL_INTERVAL_SECONDS)
 
 
+def register_trello_webhook(public_url):
+    """Register Trello webhook if not already registered."""
+    try:
+        callback_url = f"{public_url}/webhook"
+        # Check existing webhooks
+        resp = requests.get(
+            "https://api.trello.com/1/tokens/" + TRELLO_TOKEN + "/webhooks",
+            params=TRELLO_AUTH,
+        )
+        if resp.ok:
+            for wh in resp.json():
+                if wh.get("callbackURL") == callback_url:
+                    log.info("Webhook already registered: %s", callback_url)
+                    return
+        # Register new webhook
+        resp = requests.post(
+            "https://api.trello.com/1/webhooks",
+            params={
+                **TRELLO_AUTH,
+                "callbackURL": callback_url,
+                "idModel": TRELLO_FULL_BOARD_ID,
+                "description": "Invoice Totals",
+            },
+        )
+        if resp.ok:
+            log.info("Webhook registered: %s", callback_url)
+        else:
+            log.warning("Webhook registration failed: %s", resp.text)
+    except Exception as e:
+        log.warning("Webhook registration error: %s", e)
+
+
 def main():
     global TRELLO_FULL_BOARD_ID
     TRELLO_FULL_BOARD_ID = get_full_board_id()
     log.info("Invoice processor started (Trello). Board ID: %s. Poll interval: %ds", TRELLO_FULL_BOARD_ID, POLL_INTERVAL_SECONDS)
+
+    public_url = os.environ.get("RENDER_EXTERNAL_URL", "")
+    if public_url:
+        register_trello_webhook(public_url)
+    else:
+        log.warning("RENDER_EXTERNAL_URL not set - webhook not registered")
 
     # Run polling loop in background thread
     t = threading.Thread(target=polling_loop, daemon=True)
