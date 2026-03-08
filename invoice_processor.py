@@ -63,13 +63,17 @@ Fields to extract:
   "amount_dkk":      number or null,
   "due_date":        string or null,
   "payment_type":    "Auto-debit" or "Manual" or "Unknown",
+  "is_kreditnota":   true or false,
   "notes":           string
 }
 
 Rules:
 - payment_type: look for keywords like betalingsservice, PBS, direct debit,
   automatisk betaling -> Auto-debit; otherwise -> Manual; if unclear -> Unknown.
-- amount_dkk: convert decimal commas to decimal points (1.234,56 -> 1234.56).
+- amount_dkk: always extract as a POSITIVE number regardless of how it appears.
+  Convert decimal commas to decimal points (1.234,56 -> 1234.56).
+- is_kreditnota: set to true if the document is a credit note (kreditnota, kreditering,
+  credit note, godtgørelse). Otherwise false.
 - If due_date is missing set to null. Do NOT guess.
 - due_date format: YYYY-MM-DD
 - supplier_name: prefer legal entity name.
@@ -276,22 +280,38 @@ def create_trello_card(data, pdf_bytes, filename, email_subject):
     list_id = ensure_list(lists, list_name)
 
     auto_debit_label = ensure_label(labels, "Auto-debit", "blue")
-    manual_label = ensure_label(labels, "Manuel", "green")
-    ensure_label(labels, "Rykker", "red")
+    manual_label = ensure_label(labels, "Manuel", "red")
+    kreditnota_label = ensure_label(labels, "Kreditnota", "green")
+    ensure_label(labels, "Rykker", "yellow")
 
+    is_kreditnota = data.get("is_kreditnota", False)
     payment_type = data.get("payment_type", "Unknown")
     label_ids = []
-    if payment_type == "Auto-debit":
-        label_ids.append(auto_debit_label)
-    elif payment_type == "Manual":
-        label_ids.append(manual_label)
+
+    if is_kreditnota:
+        if kreditnota_label:
+            label_ids.append(kreditnota_label)
+    else:
+        if payment_type == "Auto-debit" and auto_debit_label:
+            label_ids.append(auto_debit_label)
+        elif payment_type == "Manual" and manual_label:
+            label_ids.append(manual_label)
 
     supplier = data.get("supplier_name") or "Ukendt leverandoer"
     amount = data.get("amount_dkk")
-    if amount is not None:
-        card_name = f"{supplier} - {amount:,.2f} DKK"
+
+    if is_kreditnota:
+        # Store as negative for total calculation
+        if amount is not None:
+            data["amount_dkk"] = -abs(amount)
+            card_name = f"{supplier} - KREDIT -{amount:,.2f} DKK"
+        else:
+            card_name = f"{supplier} - KREDIT"
     else:
-        card_name = supplier
+        if amount is not None:
+            card_name = f"{supplier} - {amount:,.2f} DKK"
+        else:
+            card_name = supplier
 
     desc = build_card_description(data, email_subject)
 
