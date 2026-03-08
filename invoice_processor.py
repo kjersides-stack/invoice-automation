@@ -36,6 +36,17 @@ POLL_INTERVAL_SECONDS = 3 * 60
 
 claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
+def get_full_board_id():
+    """Get the full 24-char board ID from the short ID."""
+    resp = requests.get(
+        f"https://api.trello.com/1/boards/{TRELLO_BOARD_ID}",
+        params={**TRELLO_AUTH, "fields": "id"},
+    )
+    resp.raise_for_status()
+    return resp.json()["id"]
+
+TRELLO_FULL_BOARD_ID = None  # Set at startup
+
 MONTH_NAMES = {
     1: "Januar", 2: "Februar", 3: "Marts", 4: "April",
     5: "Maj", 6: "Juni", 7: "Juli", 8: "August",
@@ -158,9 +169,11 @@ def ensure_label(labels, name, color):
         return labels[name]
     resp = requests.post(
         "https://api.trello.com/1/labels",
-        params={**TRELLO_AUTH, "name": name, "color": color, "idBoard": TRELLO_BOARD_ID},
+        params={**TRELLO_AUTH, "name": name, "color": color, "idBoard": TRELLO_FULL_BOARD_ID},
     )
-    resp.raise_for_status()
+    if not resp.ok:
+        log.warning("Label creation failed: %s — skipping label", resp.text)
+        return None
     new_id = resp.json()["id"]
     labels[name] = new_id
     log.info("Created Trello label: %s", name)
@@ -369,7 +382,9 @@ def process_unseen_emails():
 
 
 def main():
-    log.info("Invoice processor started (Trello). Poll interval: %ds", POLL_INTERVAL_SECONDS)
+    global TRELLO_FULL_BOARD_ID
+    TRELLO_FULL_BOARD_ID = get_full_board_id()
+    log.info("Invoice processor started (Trello). Board ID: %s. Poll interval: %ds", TRELLO_FULL_BOARD_ID, POLL_INTERVAL_SECONDS)
     while True:
         try:
             process_unseen_emails()
