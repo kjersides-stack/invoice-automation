@@ -74,21 +74,26 @@ Fields to extract:
 }
 
 Rules:
-- is_invoice: set to true ONLY if this is an invoice (faktura) or credit note (kreditnota).
+- is_invoice: set to true ONLY if this is an invoice (faktura), credit note (kreditnota),
+  or a refund/payout specification where money is paid TO the recipient (e.g. Dansk Retursystem
+  "Specifikation for udbetalt pant" — a pant refund for returned bottles/cans).
   Set to false for account statements (kontoudtog), letters, contracts, reminders without
-  an invoice amount, or any other document that is not a direct payment request.
+  an invoice amount, or any other document that is not a direct payment request or refund.
 - payment_type: look for keywords like betalingsservice, PBS, direct debit,
   automatisk betaling -> Auto-debit; otherwise -> Manual; if unclear -> Unknown.
 - amount_dkk: always extract as a POSITIVE number regardless of how it appears.
   Convert decimal commas to decimal points (1.234,56 -> 1234.56).
+  For Dansk Retursystem pant specs, use the absolute value of "I alt ekskl. moms".
 - is_kreditnota: set to true if the document is a credit note (kreditnota, kreditering,
-  credit note, godtgørelse). Otherwise false.
+  credit note, godtgørelse), OR if it is a payout/refund document where money flows TO
+  the recipient (e.g. Dansk Retursystem "Specifikation for udbetalt pant for emballager").
 - due_date: use the explicit due date (forfaldsdato) if present.
   If no explicit due date, calculate it from the invoice date + payment terms.
   Examples: "30 dage netto" = invoice date + 30 days, "14 dage netto" = invoice date + 14 days,
-  "netto 8 dage" = invoice date + 8 days. If neither due date nor terms are found, set to null.
+  "netto 8 dage" = invoice date + 8 days. For pant refunds, use the bogføringsdato as the date.
+  If neither due date nor terms are found, set to null.
 - due_date format: YYYY-MM-DD
-- supplier_name: prefer legal entity name.
+- supplier_name: prefer legal entity name. For Dansk Retursystem documents, use "Dansk Retursystem".
 - Return ONLY the JSON object, nothing else.
 """
 
@@ -282,18 +287,26 @@ def create_trello_card(data, pdf_bytes, filename, email_subject):
     lists = get_board_lists()
     labels = get_board_labels()
 
-    due_date = data.get("due_date")
-    if due_date:
-        try:
-            due = datetime.strptime(due_date, "%Y-%m-%d")
-            list_name = MONTH_NAMES[due.month]
-        except (ValueError, KeyError):
-            list_name = "Ingen dato"
-    else:
-        list_name = "Ingen dato"
+    supplier = data.get("supplier_name") or ""
+    is_drs = "dansk retursystem" in supplier.lower()
 
-    ensure_list(lists, "Ingen dato")
-    list_id = ensure_list(lists, list_name)
+    if is_drs:
+        list_name = "DRS"
+        ensure_list(lists, "DRS")
+        list_id = ensure_list(lists, "DRS")
+    else:
+        due_date = data.get("due_date")
+        if due_date:
+            try:
+                due = datetime.strptime(due_date, "%Y-%m-%d")
+                list_name = MONTH_NAMES[due.month]
+            except (ValueError, KeyError):
+                list_name = "Ingen dato"
+        else:
+            list_name = "Ingen dato"
+
+        ensure_list(lists, "Ingen dato")
+        list_id = ensure_list(lists, list_name)
 
     auto_debit_label = ensure_label(labels, "Auto-debit", "blue")
     manual_label = ensure_label(labels, "Manuel", "red")
@@ -365,7 +378,8 @@ def create_trello_card(data, pdf_bytes, filename, email_subject):
         except Exception as e:
             log.warning("PDF attach error: %s", e)
 
-    update_total_card(lists, list_name, list_id)
+    if not is_drs:
+        update_total_card(lists, list_name, list_id)
 
 
 # Email polling
