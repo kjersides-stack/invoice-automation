@@ -290,9 +290,10 @@ def create_trello_card(data, pdf_bytes, filename, email_subject):
     supplier = data.get("supplier_name") or ""
     is_drs = "dansk retursystem" in supplier.lower()
 
+    due_date = None  # FIX: initialise before branching so it's always defined
+
     if is_drs:
         list_name = "DRS"
-        ensure_list(lists, "DRS")
         list_id = ensure_list(lists, "DRS")
     else:
         due_date = data.get("due_date")
@@ -305,7 +306,6 @@ def create_trello_card(data, pdf_bytes, filename, email_subject):
         else:
             list_name = "Ingen dato"
 
-        ensure_list(lists, "Ingen dato")
         list_id = ensure_list(lists, list_name)
 
     auto_debit_label = ensure_label(labels, "Auto-debit", "blue")
@@ -330,7 +330,6 @@ def create_trello_card(data, pdf_bytes, filename, email_subject):
     amount = data.get("amount_dkk")
 
     if is_kreditnota:
-        # Store as negative for total calculation
         if amount is not None:
             data["amount_dkk"] = -abs(amount)
             card_name = f"{supplier} - KREDIT -kr. {amount:,.2f}"
@@ -446,13 +445,11 @@ def recalculate_all_totals():
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
     if request.method == "GET":
-        # Trello verifies the webhook endpoint with a HEAD/GET request
         return "", 200
     try:
         payload = request.get_json(silent=True) or {}
         action = payload.get("action", {})
         action_type = action.get("type", "")
-        # Card moved to a different list
         if action_type == "updateCard":
             data = action.get("data", {})
             card = data.get("card", {})
@@ -483,7 +480,6 @@ def register_trello_webhook(public_url):
     """Register Trello webhook if not already registered."""
     try:
         callback_url = f"{public_url}/webhook"
-        # Check existing webhooks
         resp = requests.get(
             "https://api.trello.com/1/tokens/" + TRELLO_TOKEN + "/webhooks",
             params=TRELLO_AUTH,
@@ -493,7 +489,6 @@ def register_trello_webhook(public_url):
                 if wh.get("callbackURL") == callback_url:
                     log.info("Webhook already registered: %s", callback_url)
                     return
-        # Register new webhook
         resp = requests.post(
             "https://api.trello.com/1/webhooks",
             params={
@@ -522,11 +517,9 @@ def main():
     else:
         log.warning("RENDER_EXTERNAL_URL not set - webhook not registered")
 
-    # Run polling loop in background thread
     t = threading.Thread(target=polling_loop, daemon=True)
     t.start()
 
-    # Run Flask in main thread (required by Render web service)
     port = int(os.environ.get("PORT", 10000))
     log.info("Starting webhook server on port %d", port)
     app.run(host="0.0.0.0", port=port)
