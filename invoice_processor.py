@@ -37,7 +37,7 @@ TRELLO_API_KEY = os.environ["TRELLO_API_KEY"]
 TRELLO_TOKEN = os.environ["TRELLO_TOKEN"]
 TRELLO_BOARD_ID = os.environ["TRELLO_BOARD_ID"]
 
-POLL_INTERVAL_SECONDS = 15 * 60
+POLL_INTERVAL_SECONDS = 30 * 60
 
 # Only process emails received on or after this date (YYYY-MM-DD)
 PROCESS_FROM_DATE = "2026-01-01"
