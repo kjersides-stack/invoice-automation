@@ -37,7 +37,7 @@ TRELLO_API_KEY = os.environ["TRELLO_API_KEY"]
 TRELLO_TOKEN = os.environ["TRELLO_TOKEN"]
 TRELLO_BOARD_ID = os.environ["TRELLO_BOARD_ID"]
 
-POLL_INTERVAL_SECONDS = 30 * 60
+POLL_INTERVAL_SECONDS = 3 * 60
 
 claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
@@ -62,6 +62,11 @@ MONTH_NAMES = {
 AUTO_DEBIT_SUPPLIERS = [
     "dagrofa",
 ]
+
+# Supplier name corrections - maps extracted name (lowercase) to correct name
+SUPPLIER_NAME_CORRECTIONS = {
+    "pak aps": "Becco I/S",
+}
 
 EXTRACTION_PROMPT = """
 You are an invoice data extraction assistant. Analyse the attached PDF and
@@ -356,6 +361,13 @@ def create_trello_card(data, pdf_bytes, filename, email_subject):
     manual_label = ensure_label(labels, "Manuel", "red")
     kreditnota_label = ensure_label(labels, "Kreditnota", "green")
     ensure_label(labels, "Rykker", "yellow")
+
+    # Hardcoded supplier name corrections
+    for wrong_name, correct_name in SUPPLIER_NAME_CORRECTIONS.items():
+        if wrong_name in supplier.lower():
+            supplier = correct_name
+            data["supplier_name"] = correct_name
+            break
 
     # Hardcoded Auto-debit override for known suppliers
     if any(s in supplier.lower() for s in AUTO_DEBIT_SUPPLIERS):
