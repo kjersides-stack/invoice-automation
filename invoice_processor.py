@@ -470,9 +470,11 @@ def process_unseen_emails():
         imap.login(IMAP_USER, IMAP_PASSWORD)
         imap.select("INBOX")
 
-        _, message_ids = imap.search(None, "UNSEEN")
+        from_date = datetime.strptime(PROCESS_FROM_DATE, "%Y-%m-%d")
+        imap_date = from_date.strftime("%d-%b-%Y")
+        _, message_ids = imap.search(None, f"SINCE {imap_date}")
         ids = message_ids[0].split()
-        log.info("%d unseen message(s) found.", len(ids))
+        log.info("%d message(s) found since %s.", len(ids), PROCESS_FROM_DATE)
 
         for msg_id in ids:
             _, msg_data = imap.fetch(msg_id, "(RFC822)")
