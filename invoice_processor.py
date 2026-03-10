@@ -39,6 +39,12 @@ TRELLO_BOARD_ID = os.environ["TRELLO_BOARD_ID"]
 
 POLL_INTERVAL_SECONDS = 15 * 60
 
+# Only process emails received on or after this date (YYYY-MM-DD)
+PROCESS_FROM_DATE = "2026-01-01"
+
+# File to track already-processed email IDs (survives restarts)
+PROCESSED_IDS_FILE = "/tmp/processed_email_ids.txt"
+
 claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 def get_full_board_id():
