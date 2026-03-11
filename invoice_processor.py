@@ -43,7 +43,7 @@ POLL_INTERVAL_SECONDS = 30 * 60
 PROCESS_FROM_DATE = "2026-01-01"
 
 # File to track already-processed email IDs (survives restarts)
-PROCESSED_IDS_FILE = "/tmp/processed_email_ids.txt"
+PROCESSED_IDS_FILE = "/data/processed_email_ids.txt"
 
 claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
